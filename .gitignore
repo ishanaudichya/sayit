@@ -1,0 +1,26 @@
+# Build artifacts
+build/
+DerivedData/
+.build/
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Xcode project is generated from project.yml (xcodegen generate)
+*.xcodeproj
+
+# Xcode user state
+xcuserdata/
+*.xcuserstate
+*.xcscmblueprint
+
+# SwiftPM
+.swiftpm/
+Package.resolved
+
+# macOS
+.DS_Store
+
+# Secrets / local config
+.env
+*.local
