@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// The black pill shown while dictating: live waveform while recording,
-/// then a brief checkmark / error state.
+/// The dictation pill: ink capsule, citron waveform, citron glow while
+/// listening. Pops in with a spring, morphs into a check on insert.
 struct BubbleView: View {
     @Environment(AppController.self) private var app
 
@@ -13,34 +13,57 @@ struct BubbleView: View {
                     .transition(.opacity)
             case .finishing:
                 WaveformView(level: 0)
-                    .opacity(0.35)
+                    .opacity(0.3)
             case .inserted:
-                Image(systemName: "checkmark")
-                    .font(.system(size: 15, weight: .bold))
-                    .foregroundStyle(.white)
-                    .transition(.scale.combined(with: .opacity))
+                ZStack {
+                    Circle()
+                        .fill(Theme.citron)
+                        .frame(width: 22, height: 22)
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 11, weight: .heavy))
+                        .foregroundStyle(Theme.ink)
+                }
+                .transition(.scale(scale: 0.4).combined(with: .opacity))
             case .error(let message):
                 Label(message, systemImage: "exclamationmark.triangle.fill")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(.white)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Theme.coral)
                     .lineLimit(1)
-                    .padding(.horizontal, 8)
+                    .padding(.horizontal, 10)
             case .idle:
                 Color.clear
             }
         }
-        .frame(width: 232, height: 40)
+        .frame(width: 236, height: 42)
         .background(
             Capsule(style: .continuous)
-                .fill(Color.black.opacity(0.88))
+                .fill(Theme.ink.opacity(0.94))
         )
         .overlay(
             Capsule(style: .continuous)
-                .strokeBorder(Color.white.opacity(0.12), lineWidth: 1)
+                .strokeBorder(strokeColor, lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.35), radius: 14, y: 4)
-        .animation(.spring(duration: 0.25), value: app.status)
+        .shadow(color: glowColor, radius: 16, y: 3)
+        .scaleEffect(app.status == .idle ? 0.88 : 1)
+        .animation(Theme.springFast, value: app.status)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var strokeColor: Color {
+        switch app.status {
+        case .recording: return Theme.citron.opacity(0.28)
+        case .error: return Theme.coral.opacity(0.35)
+        default: return Theme.hairline
+        }
+    }
+
+    private var glowColor: Color {
+        switch app.status {
+        case .recording: return Theme.citron.opacity(0.20)
+        case .inserted: return Theme.citron.opacity(0.25)
+        case .error: return Theme.coral.opacity(0.25)
+        default: return Color.black.opacity(0.35)
+        }
     }
 }
 
@@ -65,7 +88,7 @@ struct WaveformView: View {
                     let rect = CGRect(x: x, y: (size.height - height) / 2, width: barWidth, height: height)
                     context.fill(
                         Path(roundedRect: rect, cornerRadius: barWidth / 2),
-                        with: .color(.white.opacity(0.95))
+                        with: .color(Theme.citron)
                     )
                     x += barWidth + spacing
                 }

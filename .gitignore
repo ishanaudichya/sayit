@@ -6,8 +6,9 @@ DerivedData/
 *.dSYM.zip
 *.dSYM
 
-# Xcode project is generated from project.yml (xcodegen generate)
+# Generated from project.yml (xcodegen generate)
 *.xcodeproj
+/Info.plist
 
 # Xcode user state
 xcuserdata/

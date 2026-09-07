@@ -17,6 +17,7 @@ struct SayItApp: App {
                 .environment(AppController.shared)
         }
         .windowResizability(.contentSize)
+        .windowStyle(.hiddenTitleBar)
         .defaultLaunchBehavior(.presented)
 
         Settings {

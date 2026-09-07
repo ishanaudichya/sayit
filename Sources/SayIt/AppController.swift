@@ -18,6 +18,8 @@ final class AppController {
     var status: Status = .idle
     var audioLevel: Float = 0
     var liveTranscript: String = ""
+    var totalWords: Int = 0
+    var totalDictations: Int = 0
     let permissions = PermissionsModel()
 
     private let hotkey = HotkeyMonitor()
@@ -33,6 +35,15 @@ final class AppController {
     private static let maxRecordingSeconds: TimeInterval = 120
 
     func start() {
+        UserDefaults.standard.register(defaults: [
+            "soundsEnabled": true,
+            "hapticsEnabled": true,
+            "smartFormattingEnabled": true,
+        ])
+        totalWords = UserDefaults.standard.integer(forKey: "stats.totalWords")
+        totalDictations = UserDefaults.standard.integer(forKey: "stats.totalDictations")
+        _ = SoundPlayer.shared // preload sound buffers before the first Fn press
+        SmartFormatter.shared.prewarm()
         permissions.refresh()
         Task.detached(priority: .utility) {
             await DictationTranscriber.preloadAssets()
@@ -56,6 +67,9 @@ final class AppController {
         liveTranscript = ""
         audioLevel = 0
         recordingStartedAt = Date()
+        // Feedback first — the flick must land the instant the key goes down.
+        SoundPlayer.shared.play(.start)
+        SoundPlayer.shared.haptic(.generic)
         bubble.show()
         startWatchdog()
 
@@ -83,6 +97,8 @@ final class AppController {
         guard case .recording = status else { return }
         status = .finishing
         stopWatchdog()
+        SoundPlayer.shared.play(.stop)
+        SoundPlayer.shared.haptic(.levelChange)
         audio.stop()
 
         let transcriber = self.transcriber
@@ -123,15 +139,27 @@ final class AppController {
                 return
             }
 
+            // Smart formatting: bounded time slice scaled to length; raw text
+            // pastes if the model is slow or unavailable.
+            var finalText = trimmed
+            let budget = min(1.2 + Double(trimmed.split { $0.isWhitespace }.count) * 0.03, 2.5)
+            if let cleaned = await SmartFormatter.shared.clean(trimmed, timeout: budget) {
+                finalText = cleaned
+            }
+
             do {
-                try self.inserter.insert(trimmed)
+                try self.inserter.insert(finalText)
                 self.status = .inserted
+                self.recordStats(for: finalText)
+                SoundPlayer.shared.play(.success)
                 self.bubble.hide(after: 0.45)
             } catch TextInserter.InsertError.secureInput {
                 self.status = .error("Secure field — copied to clipboard")
+                SoundPlayer.shared.play(.error)
                 self.bubble.hide(after: 1.6)
             } catch {
                 self.status = .error("Couldn't insert text")
+                SoundPlayer.shared.play(.error)
                 self.bubble.hide(after: 1.6)
             }
             try? await Task.sleep(for: .seconds(1.8))
@@ -169,11 +197,19 @@ final class AppController {
         }
     }
 
+    private func recordStats(for text: String) {
+        totalWords += text.split { $0.isWhitespace || $0.isNewline }.count
+        totalDictations += 1
+        UserDefaults.standard.set(totalWords, forKey: "stats.totalWords")
+        UserDefaults.standard.set(totalDictations, forKey: "stats.totalDictations")
+    }
+
     private func failDictation(_ message: String) {
         stopWatchdog()
         audio.stop()
         transcriber?.cancel()
         transcriber = nil
+        SoundPlayer.shared.play(.error)
         status = .error(message)
         bubble.hide(after: 1.6)
         Task { @MainActor [weak self] in

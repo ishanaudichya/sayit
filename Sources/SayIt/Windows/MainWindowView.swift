@@ -1,30 +1,74 @@
 import SwiftUI
 
-/// The app's home window: permission setup, a place to test dictation, and a
-/// live status readout. Closing it never stops SayIt — the menu bar agent
-/// keeps listening for Fn.
+/// The app window. Runs onboarding on first launch, then becomes the home
+/// dashboard. Closing it never stops SayIt — the menu bar agent keeps going.
 struct MainWindowView: View {
     @Environment(AppController.self) private var app
-    @State private var testText = ""
-
-    private let refreshTimer = Timer.publish(every: 1.5, on: .main, in: .common).autoconnect()
+    @AppStorage("onboardingComplete") private var onboardingComplete = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            header
+        ZStack {
+            if onboardingComplete {
+                DashboardView()
+                    .transition(.opacity.combined(with: .scale(scale: 0.98)))
+            } else {
+                OnboardingView {
+                    onboardingComplete = true
+                }
+                .transition(.opacity)
+            }
+        }
+        .animation(Theme.spring, value: onboardingComplete)
+        .background(Theme.ink)
+        .containerBackground(Theme.ink, for: .window)
+        .preferredColorScheme(.dark)
+    }
+}
 
-            if !app.permissions.allGranted || !app.permissions.fnKeyConfigured {
-                setupSection
+// MARK: - Dashboard
+
+private struct DashboardView: View {
+    @Environment(AppController.self) private var app
+    @AppStorage("onboardingComplete") private var onboardingComplete = true
+    @State private var testText = ""
+
+    private let poll = Timer.publish(every: 1.5, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                Wordmark(size: 17)
+                Spacer()
+                StatusChip(label: statusLabel, color: statusColor)
+            }
+            .padding(.top, 6)
+
+            hero
+
+            HStack(spacing: 14) {
+                StatTile(value: app.totalWords, label: "words dictated")
+                StatTile(value: app.totalDictations, label: "dictations")
             }
 
-            trySection
+            if !app.permissions.allGranted || !app.permissions.fnKeyConfigured {
+                healthStrip
+            }
 
-            footer
+            testCard
+
+            HStack {
+                Text("Lives in your menu bar — close this window anytime.")
+                    .font(.system(size: 11.5))
+                    .foregroundStyle(Theme.boneFaint)
+                Spacer()
+                Button("Run setup again") { onboardingComplete = false }
+                    .buttonStyle(LinkButtonStyle())
+            }
         }
         .padding(24)
-        .frame(width: 460)
+        .frame(width: 520)
         .onAppear { app.permissions.refresh() }
-        .onReceive(refreshTimer) { _ in
+        .onReceive(poll) { _ in
             let hadAccessibility = app.permissions.accessibilityGranted
             app.permissions.refresh()
             if !hadAccessibility && app.permissions.accessibilityGranted {
@@ -33,141 +77,125 @@ struct MainWindowView: View {
         }
     }
 
-    private var header: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "waveform.circle.fill")
-                .font(.system(size: 36))
-                .foregroundStyle(.tint)
-            VStack(alignment: .leading, spacing: 2) {
-                Text("SayIt")
-                    .font(.title2.bold())
-                Text("Hold Fn, speak, release. Your words land at the cursor.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+    private var hero: some View {
+        HStack(spacing: 18) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Hold fn.\nStart talking.")
+                    .font(Theme.display(26))
+                    .tracking(-0.7)
+                    .foregroundStyle(Theme.bone)
+                    .lineSpacing(2)
+                Text("Anywhere you can type — release and it's written.")
+                    .font(Theme.body(12.5))
+                    .foregroundStyle(Theme.boneDim)
+            }
+            Spacer()
+            VStack(spacing: 10) {
+                KeyCap(size: 52)
+                WaveMark(height: 18, animated: app.status == .recording)
             }
         }
+        .card(padding: 22)
     }
 
-    private var setupSection: some View {
+    private var healthStrip: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Setup")
-                .font(.headline)
-
-            PermissionRow(
-                title: "Microphone",
-                detail: "Needed to hear you. Audio never leaves this Mac.",
-                granted: app.permissions.microphoneGranted,
-                actionTitle: "Allow"
-            ) {
-                app.permissions.requestMicrophone()
+            Label("Needs attention", systemImage: "exclamationmark.triangle.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Theme.coral)
+            if !app.permissions.microphoneGranted {
+                healthRow("Microphone access", "Allow") {
+                    app.permissions.requestMicrophone()
+                }
             }
-
-            PermissionRow(
-                title: "Accessibility",
-                detail: "Needed to detect the Fn key and type text for you.",
-                granted: app.permissions.accessibilityGranted,
-                actionTitle: "Open Settings"
-            ) {
-                app.permissions.promptAccessibility()
-                app.permissions.openAccessibilitySettings()
+            if !app.permissions.accessibilityGranted {
+                healthRow("Accessibility access", "Open Settings") {
+                    app.permissions.promptAccessibility()
+                    app.permissions.openAccessibilitySettings()
+                }
             }
-
-            PermissionRow(
-                title: "Fn key does nothing",
-                detail: "In System Settings → Keyboard, set “Press 🌐 key to” → Do Nothing so SayIt owns the key.",
-                granted: app.permissions.fnKeyConfigured,
-                actionTitle: "Open Keyboard Settings"
-            ) {
-                app.permissions.openKeyboardSettings()
+            if !app.permissions.fnKeyConfigured {
+                healthRow("Set “Press 🌐 key to” → Do Nothing", "Open Keyboard") {
+                    app.permissions.openKeyboardSettings()
+                }
             }
         }
-        .padding(14)
-        .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .card(padding: 16)
     }
 
-    private var trySection: some View {
+    private func healthRow(_ title: String, _ actionTitle: String, action: @escaping () -> Void) -> some View {
+        HStack {
+            Text(title)
+                .font(Theme.body(12.5))
+                .foregroundStyle(Theme.bone)
+            Spacer()
+            Button(actionTitle, action: action)
+                .buttonStyle(GhostButtonStyle())
+        }
+    }
+
+    private var testCard: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Try it")
-                .font(.headline)
-            Text("Click into the field below (or any app), hold **Fn**, and talk.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
+            Text("SCRATCHPAD")
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(1.2)
+                .foregroundStyle(Theme.boneFaint)
             TextEditor(text: $testText)
-                .font(.body)
-                .frame(height: 72)
-                .padding(6)
-                .background(.background, in: RoundedRectangle(cornerRadius: 8))
+                .font(.system(size: 13.5))
+                .foregroundStyle(Theme.bone)
+                .scrollContentBackground(.hidden)
+                .padding(8)
+                .frame(height: 64)
+                .background(
+                    RoundedRectangle(cornerRadius: Theme.Radius.well, style: .continuous)
+                        .fill(Theme.inkSunken)
+                )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .strokeBorder(.separator, lineWidth: 1)
+                    RoundedRectangle(cornerRadius: Theme.Radius.well, style: .continuous)
+                        .strokeBorder(Theme.hairline, lineWidth: 1)
                 )
         }
+        .card(padding: 16)
     }
 
-    private var footer: some View {
-        HStack {
-            Circle()
-                .fill(statusColor)
-                .frame(width: 8, height: 8)
-            Text(statusText)
-                .font(.callout)
-                .foregroundStyle(.secondary)
-            Spacer()
-            Text("You can close this window — SayIt keeps running in the menu bar.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .multilineTextAlignment(.trailing)
-                .frame(maxWidth: 180)
+    private var statusLabel: String {
+        switch app.status {
+        case .idle: return app.permissions.allGranted ? "Ready" : "Setup needed"
+        case .recording: return "Listening"
+        case .finishing: return "Finishing"
+        case .inserted: return "Inserted"
+        case .error(let message): return message
         }
     }
 
     private var statusColor: Color {
         switch app.status {
-        case .idle: return app.permissions.allGranted ? .green : .orange
-        case .recording: return .red
-        case .finishing: return .yellow
-        case .inserted: return .green
-        case .error: return .red
-        }
-    }
-
-    private var statusText: String {
-        switch app.status {
-        case .idle: return app.permissions.allGranted ? "Ready — hold Fn to dictate" : "Waiting for permissions"
-        case .recording: return "Listening…"
-        case .finishing: return "Finishing…"
-        case .inserted: return "Inserted"
-        case .error(let message): return message
+        case .idle: return app.permissions.allGranted ? Theme.citron : Theme.coral
+        case .recording: return Theme.citron
+        case .finishing: return Theme.boneDim
+        case .inserted: return Theme.citron
+        case .error: return Theme.coral
         }
     }
 }
 
-private struct PermissionRow: View {
-    let title: String
-    let detail: String
-    let granted: Bool
-    let actionTitle: String
-    let action: () -> Void
+private struct StatTile: View {
+    var value: Int
+    var label: String
 
     var body: some View {
-        HStack(alignment: .top, spacing: 10) {
-            Image(systemName: granted ? "checkmark.circle.fill" : "circle.dashed")
-                .foregroundStyle(granted ? .green : .secondary)
-                .font(.system(size: 16))
-                .padding(.top, 1)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.callout.weight(.medium))
-                Text(detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            Spacer()
-            if !granted {
-                Button(actionTitle, action: action)
-                    .controlSize(.small)
-            }
+        VStack(alignment: .leading, spacing: 3) {
+            Text("\(value)")
+                .font(Theme.mono(22))
+                .foregroundStyle(Theme.citron)
+                .contentTransition(.numericText())
+                .animation(Theme.spring, value: value)
+            Text(label)
+                .font(.system(size: 11))
+                .foregroundStyle(Theme.boneDim)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .card(padding: 14)
     }
 }
