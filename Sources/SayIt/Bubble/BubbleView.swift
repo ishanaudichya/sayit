@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// The dictation pill: ink capsule, citron waveform, citron glow while
-/// listening. Pops in with a spring, morphs into a check on insert.
+/// The dictation pill: ink capsule, monochrome waveform, soft neutral shadow.
+/// Pops in with a spring, morphs into a check on insert.
 struct BubbleView: View {
     @Environment(AppController.self) private var app
 
@@ -9,15 +9,23 @@ struct BubbleView: View {
         ZStack {
             switch app.status {
             case .recording:
-                WaveformView(level: app.audioLevel)
-                    .transition(.opacity)
+                HStack(spacing: 8) {
+                    if app.handsFree {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(Pill.text.opacity(0.6))
+                            .transition(.scale.combined(with: .opacity))
+                    }
+                    WaveformView(level: app.audioLevel)
+                }
+                .transition(.opacity)
             case .finishing:
                 WaveformView(level: 0)
                     .opacity(0.3)
             case .inserted:
                 ZStack {
                     Circle()
-                        .fill(Pill.citron)
+                        .fill(Pill.text)
                         .frame(width: 22, height: 22)
                     Image(systemName: "checkmark")
                         .font(.system(size: 11, weight: .heavy))
@@ -43,26 +51,18 @@ struct BubbleView: View {
             Capsule(style: .continuous)
                 .strokeBorder(strokeColor, lineWidth: 1)
         )
-        .shadow(color: glowColor, radius: 16, y: 3)
+        .shadow(color: .black.opacity(0.38), radius: 11, y: 3)
         .scaleEffect(app.status == .idle ? 0.88 : 1)
         .animation(Theme.springFast, value: app.status)
+        .animation(Theme.springFast, value: app.handsFree)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var strokeColor: Color {
         switch app.status {
-        case .recording: return Pill.citron.opacity(0.28)
+        case .recording: return Pill.text.opacity(0.22)
         case .error: return Pill.coral.opacity(0.35)
         default: return Pill.hairline
-        }
-    }
-
-    private var glowColor: Color {
-        switch app.status {
-        case .recording: return Pill.citron.opacity(0.20)
-        case .inserted: return Pill.citron.opacity(0.25)
-        case .error: return Pill.coral.opacity(0.25)
-        default: return Color.black.opacity(0.35)
         }
     }
 }
@@ -88,7 +88,7 @@ struct WaveformView: View {
                     let rect = CGRect(x: x, y: (size.height - height) / 2, width: barWidth, height: height)
                     context.fill(
                         Path(roundedRect: rect, cornerRadius: barWidth / 2),
-                        with: .color(Pill.citron)
+                        with: .color(Pill.text.opacity(0.95))
                     )
                     x += barWidth + spacing
                 }
@@ -99,10 +99,11 @@ struct WaveformView: View {
 }
 
 /// The pill floats over arbitrary wallpapers, so it stays ink-dark in both
-/// appearance modes — its palette is fixed, not adaptive.
+/// appearance modes — its palette is fixed, not adaptive. Monochrome by
+/// design: the pill signals with motion, not color.
 private enum Pill {
     static let ink = Color(red: 0.067, green: 0.067, blue: 0.075)
-    static let citron = Color(red: 0.816, green: 0.945, blue: 0.247)
+    static let text = Color(red: 0.949, green: 0.937, blue: 0.910)
     static let coral = Color(red: 1.0, green: 0.44, blue: 0.35)
     static let hairline = Color.white.opacity(0.12)
 }

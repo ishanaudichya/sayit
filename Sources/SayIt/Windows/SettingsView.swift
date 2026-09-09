@@ -7,6 +7,8 @@ struct SettingsPage: View {
     @Environment(AppController.self) private var app
     @State private var launchAtLogin = SMAppService.mainApp.status == .enabled
     @AppStorage("appearance") private var appearanceRaw = "system"
+    @AppStorage("punctuationMode") private var punctuationRaw = "auto"
+    @AppStorage("matchToneEnabled") private var matchToneEnabled = true
     @AppStorage("soundsEnabled") private var soundsEnabled = true
     @AppStorage("hapticsEnabled") private var hapticsEnabled = true
     @AppStorage("smartFormattingEnabled") private var smartFormattingEnabled = true
@@ -29,10 +31,28 @@ struct SettingsPage: View {
                                 appearanceRaw = option.rawValue
                                 option.apply()
                             }
-                            .buttonStyle(AppearanceChipStyle(selected: appearanceRaw == option.rawValue))
+                            .buttonStyle(ChipStyle(selected: appearanceRaw == option.rawValue))
                         }
                         Spacer()
                     }
+                }
+                .card(padding: 16)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    SectionHeader(title: "Punctuation")
+                    HStack(spacing: 6) {
+                        ForEach(PunctuationMode.allCases) { mode in
+                            Button(mode.label) {
+                                punctuationRaw = mode.rawValue
+                            }
+                            .buttonStyle(ChipStyle(selected: punctuationRaw == mode.rawValue))
+                        }
+                        Spacer()
+                    }
+                    Text((PunctuationMode(rawValue: punctuationRaw) ?? .auto).caption)
+                        .font(.system(size: 10.5))
+                        .foregroundStyle(Theme.textFaint)
+                        .animation(nil, value: punctuationRaw)
                 }
                 .card(padding: 16)
 
@@ -73,10 +93,24 @@ struct SettingsPage: View {
                             .foregroundStyle(Theme.textFaint)
                     }
                     divider
+                    VStack(alignment: .leading, spacing: 5) {
+                        Toggle("Match tone to app", isOn: $matchToneEnabled)
+                            .toggleStyle(ThemeToggleStyle())
+                            .disabled(!SmartFormatter.shared.isAvailable || !smartFormattingEnabled)
+                        Text("Relaxed in chat apps, professional in mail — based on where you're dictating.")
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(Theme.textFaint)
+                    }
+                    divider
                     HStack {
-                        Text("Dictation key")
-                            .font(Theme.body())
-                            .foregroundStyle(Theme.text)
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text("Dictation key")
+                                .font(Theme.body())
+                                .foregroundStyle(Theme.text)
+                            Text("Hold to talk · double-tap to lock hands-free · Esc cancels")
+                                .font(.system(size: 10.5))
+                                .foregroundStyle(Theme.textFaint)
+                        }
                         Spacer()
                         KeyCap(size: 30)
                     }
@@ -117,7 +151,7 @@ struct SettingsPage: View {
     }
 }
 
-private struct AppearanceChipStyle: ButtonStyle {
+private struct ChipStyle: ButtonStyle {
     var selected: Bool
 
     func makeBody(configuration: Configuration) -> some View {

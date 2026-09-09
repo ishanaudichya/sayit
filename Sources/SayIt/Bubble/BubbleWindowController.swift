@@ -39,20 +39,24 @@ final class BubbleWindowController {
 
     private func ensurePanel() -> NSPanel {
         if let panel { return panel }
+        // The panel is larger than the pill so its soft shadow has room to
+        // render — a tight frame clips the shadow into visible square edges.
         let panel = NSPanel(
-            contentRect: NSRect(x: 0, y: 0, width: 260, height: 52),
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 88),
             styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
         panel.isFloatingPanel = true
-        panel.level = .statusBar
+        // High level + fullScreenAuxiliary so the pill shows over full-screen
+        // apps, not just regular windows.
+        panel.level = .screenSaver
         panel.backgroundColor = .clear
         panel.isOpaque = false
         panel.hasShadow = false
         panel.ignoresMouseEvents = true
         panel.hidesOnDeactivate = false
-        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         panel.contentView = NSHostingView(
             rootView: BubbleView().environment(AppController.shared)
         )
@@ -67,11 +71,13 @@ final class BubbleWindowController {
             ?? NSScreen.main
             ?? NSScreen.screens.first
         guard let screen else { return }
+        // In full screen, visibleFrame can equal the whole display; the pill
+        // still sits a comfortable margin above the bottom edge.
         let frame = screen.visibleFrame
         let size = panel.frame.size
         panel.setFrameOrigin(NSPoint(
             x: frame.midX - size.width / 2,
-            y: frame.minY + 28
+            y: frame.minY + 12
         ))
     }
 }

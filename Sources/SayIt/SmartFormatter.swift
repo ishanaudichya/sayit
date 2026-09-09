@@ -58,7 +58,8 @@ final class SmartFormatter {
 
     /// Returns cleaned text, or nil when the raw transcript should be used
     /// (disabled, unavailable, too short, timed out, or suspicious output).
-    func clean(_ text: String, timeout: Double) async -> String? {
+    /// `appName` is the app the text will be typed into, for tone matching.
+    func clean(_ text: String, timeout: Double, appName: String? = nil) async -> String? {
         guard UserDefaults.standard.bool(forKey: "smartFormattingEnabled"),
               isAvailable else { return nil }
         let wordCount = text.split { $0.isWhitespace }.count
@@ -66,11 +67,25 @@ final class SmartFormatter {
 
         let session = warmSession ?? LanguageModelSession(instructions: Self.instructions)
         warmSession = nil
-        var prompt = "Transcript: \(text)"
+
+        var hints: [String] = []
+        switch PunctuationMode.current {
+        case .auto:
+            break
+        case .spoken:
+            hints.append("Punctuation was dictated explicitly — keep it exactly as written and do not add more.")
+        case .minimal:
+            hints.append("Use minimal punctuation: only what is essential for clarity. Avoid commas where possible.")
+        }
+        if let appName {
+            hints.append("The text will be typed into \(appName). Match the register people typically use there — relaxed in chat apps, professional in email — without changing the content.")
+        }
         let vocabulary = Store.shared.vocabularyWords
         if !vocabulary.isEmpty {
-            prompt = "Prefer these exact spellings when they occur: \(vocabulary.joined(separator: ", ")).\n\n" + prompt
+            hints.append("Prefer these exact spellings when they occur: \(vocabulary.joined(separator: ", ")).")
         }
+        let prompt = (hints + ["Transcript: \(text)"]).joined(separator: "\n\n")
+
         let response = await withTimeout(seconds: timeout) {
             try? await session.respond(to: prompt).content
         }

@@ -84,13 +84,16 @@ private struct RecordRow: View {
     let record: DictationRecord
     @State private var hovering = false
     @State private var copied = false
+    @State private var showRaw = false
+
+    private var wasCleaned: Bool { record.raw != record.text }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(record.text)
                 .font(Theme.body(12.5))
                 .foregroundStyle(Theme.text)
-                .lineLimit(2)
+                .lineLimit(showRaw ? nil : 2)
                 .frame(maxWidth: .infinity, alignment: .leading)
             HStack(spacing: 10) {
                 Text(record.date.formatted(.relative(presentation: .named)))
@@ -99,10 +102,48 @@ private struct RecordRow: View {
                     Text("\(record.wpm) wpm")
                         .font(Theme.mono(10.5, weight: .medium))
                 }
+                if wasCleaned {
+                    Button {
+                        withAnimation(Theme.spring) { showRaw.toggle() }
+                    } label: {
+                        HStack(spacing: 3) {
+                            Image(systemName: "sparkles")
+                            Text("cleaned")
+                            Image(systemName: showRaw ? "chevron.up" : "chevron.down")
+                                .font(.system(size: 8, weight: .bold))
+                        }
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Theme.accent)
+                    }
+                    .buttonStyle(.plain)
+                }
                 Spacer()
             }
             .font(.system(size: 10.5))
             .foregroundStyle(Theme.textFaint)
+
+            if showRaw && wasCleaned {
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        SectionHeader(title: "What was heard")
+                        Spacer()
+                        Button {
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(record.raw, forType: .string)
+                        } label: {
+                            Text("Copy raw")
+                        }
+                        .buttonStyle(LinkButtonStyle())
+                    }
+                    Text(record.raw)
+                        .font(Theme.body(12))
+                        .foregroundStyle(Theme.textDim)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .padding(10)
+                .well()
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
         .padding(12)
         .background(

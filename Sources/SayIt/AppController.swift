@@ -18,6 +18,8 @@ final class AppController {
     var status: Status = .idle
     var audioLevel: Float = 0
     var liveTranscript: String = ""
+    /// Double-tap Fn locks recording on until the next Fn tap.
+    private(set) var handsFree = false
     let permissions = PermissionsModel()
 
     private let hotkey = HotkeyMonitor()
@@ -28,6 +30,9 @@ final class AppController {
     private var setupTask: Task<Void, Never>?
     private var recordingStartedAt: Date?
     private var watchdog: Timer?
+    private var lastFnDown: Date?
+    private var targetApp: String?
+    private var escMonitors: [Any] = []
 
     /// Hard cap so a stuck session can never hold the mic open indefinitely.
     private static let maxRecordingSeconds: TimeInterval = 120
@@ -37,6 +42,8 @@ final class AppController {
             "soundsEnabled": true,
             "hapticsEnabled": true,
             "smartFormattingEnabled": true,
+            "matchToneEnabled": true,
+            "punctuationMode": "auto",
         ])
         Appearance.applyStored()
         _ = Store.shared // load history + dictionary
@@ -49,9 +56,28 @@ final class AppController {
         audio.onLevel = { [weak self] level in
             Task { @MainActor in self?.audioLevel = level }
         }
-        hotkey.onFnDown = { [weak self] in self?.beginDictation() }
-        hotkey.onFnUp = { [weak self] in self?.endDictation() }
+        hotkey.onFnDown = { [weak self] in self?.fnDown() }
+        hotkey.onFnUp = { [weak self] in self?.fnUp() }
         hotkey.start()
+    }
+
+    private func fnDown() {
+        if case .recording = status {
+            // In hands-free mode, a tap ends the dictation.
+            if handsFree { endDictation() }
+            return
+        }
+        let now = Date()
+        if let last = lastFnDown, now.timeIntervalSince(last) < 0.4 {
+            handsFree = true
+        }
+        lastFnDown = now
+        beginDictation()
+    }
+
+    private func fnUp() {
+        guard !handsFree else { return }
+        endDictation()
     }
 
     /// Re-arm the global event monitor (used after Accessibility is granted).
@@ -65,11 +91,13 @@ final class AppController {
         liveTranscript = ""
         audioLevel = 0
         recordingStartedAt = Date()
+        targetApp = NSWorkspace.shared.frontmostApplication?.localizedName
         // Feedback first — the flick must land the instant the key goes down.
         SoundPlayer.shared.play(.start)
         SoundPlayer.shared.haptic(.generic)
         bubble.show()
         startWatchdog()
+        installEscMonitor()
 
         let transcriber = DictationTranscriber()
         self.transcriber = transcriber
@@ -91,10 +119,27 @@ final class AppController {
         }
     }
 
+    /// Esc while recording throws the dictation away — nothing is pasted.
+    private func cancelDictation() {
+        guard case .recording = status else { return }
+        stopWatchdog()
+        removeEscMonitor()
+        handsFree = false
+        audio.stop()
+        setupTask?.cancel()
+        transcriber?.cancel()
+        transcriber = nil
+        SoundPlayer.shared.play(.stop)
+        status = .idle
+        bubble.hide()
+    }
+
     private func endDictation() {
         guard case .recording = status else { return }
         status = .finishing
         stopWatchdog()
+        removeEscMonitor()
+        handsFree = false
         SoundPlayer.shared.play(.stop)
         SoundPlayer.shared.haptic(.levelChange)
         audio.stop()
@@ -137,13 +182,18 @@ final class AppController {
                 return
             }
 
-            // Dictionary replacements first (deterministic), then smart
-            // formatting inside a bounded time slice — raw text pastes if the
-            // model is slow or unavailable.
-            let replaced = Store.shared.applyReplacements(to: trimmed)
-            var finalText = replaced
-            let budget = min(1.2 + Double(replaced.split { $0.isWhitespace }.count) * 0.03, 2.5)
-            if let cleaned = await SmartFormatter.shared.clean(replaced, timeout: budget) {
+            // Deterministic rules first (spoken punctuation, dictionary
+            // replacements), then smart formatting inside a bounded time
+            // slice — raw text pastes if the model is slow or unavailable.
+            var processed = trimmed
+            if PunctuationMode.current == .spoken {
+                processed = TextRules.applySpokenPunctuation(processed)
+            }
+            processed = Store.shared.applyReplacements(to: processed)
+            var finalText = processed
+            let budget = min(1.2 + Double(processed.split { $0.isWhitespace }.count) * 0.03, 2.5)
+            let toneApp = UserDefaults.standard.bool(forKey: "matchToneEnabled") ? self.targetApp : nil
+            if let cleaned = await SmartFormatter.shared.clean(processed, timeout: budget, appName: toneApp) {
                 finalText = cleaned
             }
 
@@ -191,18 +241,44 @@ final class AppController {
             stopWatchdog()
             return
         }
-        let fnStillDown = NSEvent.modifierFlags.contains(.function)
+        let missedRelease = !handsFree && !NSEvent.modifierFlags.contains(.function)
         let tooLong = recordingStartedAt.map {
             Date().timeIntervalSince($0) > Self.maxRecordingSeconds
         } ?? false
-        if !fnStillDown || tooLong {
-            NSLog("SayIt: watchdog ended dictation (fnDown=\(fnStillDown), tooLong=\(tooLong))")
+        if missedRelease || tooLong {
+            NSLog("SayIt: watchdog ended dictation (missedRelease=\(missedRelease), tooLong=\(tooLong))")
             endDictation()
         }
     }
 
+    private func installEscMonitor() {
+        removeEscMonitor()
+        if let global = NSEvent.addGlobalMonitorForEvents(matching: .keyDown, handler: { [weak self] event in
+            guard event.keyCode == 53 else { return }
+            self?.cancelDictation()
+        }) {
+            escMonitors.append(global)
+        }
+        if let local = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: { [weak self] event in
+            guard event.keyCode == 53, case .recording = self?.status else { return event }
+            self?.cancelDictation()
+            return nil
+        }) {
+            escMonitors.append(local)
+        }
+    }
+
+    private func removeEscMonitor() {
+        for monitor in escMonitors {
+            NSEvent.removeMonitor(monitor)
+        }
+        escMonitors.removeAll()
+    }
+
     private func failDictation(_ message: String) {
         stopWatchdog()
+        removeEscMonitor()
+        handsFree = false
         audio.stop()
         transcriber?.cancel()
         transcriber = nil
