@@ -17,17 +17,17 @@ struct BubbleView: View {
             case .inserted:
                 ZStack {
                     Circle()
-                        .fill(Theme.citron)
+                        .fill(Pill.citron)
                         .frame(width: 22, height: 22)
                     Image(systemName: "checkmark")
                         .font(.system(size: 11, weight: .heavy))
-                        .foregroundStyle(Theme.ink)
+                        .foregroundStyle(Pill.ink)
                 }
                 .transition(.scale(scale: 0.4).combined(with: .opacity))
             case .error(let message):
                 Label(message, systemImage: "exclamationmark.triangle.fill")
                     .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(Theme.coral)
+                    .foregroundStyle(Pill.coral)
                     .lineLimit(1)
                     .padding(.horizontal, 10)
             case .idle:
@@ -37,7 +37,7 @@ struct BubbleView: View {
         .frame(width: 236, height: 42)
         .background(
             Capsule(style: .continuous)
-                .fill(Theme.ink.opacity(0.94))
+                .fill(Pill.ink.opacity(0.94))
         )
         .overlay(
             Capsule(style: .continuous)
@@ -51,17 +51,17 @@ struct BubbleView: View {
 
     private var strokeColor: Color {
         switch app.status {
-        case .recording: return Theme.citron.opacity(0.28)
-        case .error: return Theme.coral.opacity(0.35)
-        default: return Theme.hairline
+        case .recording: return Pill.citron.opacity(0.28)
+        case .error: return Pill.coral.opacity(0.35)
+        default: return Pill.hairline
         }
     }
 
     private var glowColor: Color {
         switch app.status {
-        case .recording: return Theme.citron.opacity(0.20)
-        case .inserted: return Theme.citron.opacity(0.25)
-        case .error: return Theme.coral.opacity(0.25)
+        case .recording: return Pill.citron.opacity(0.20)
+        case .inserted: return Pill.citron.opacity(0.25)
+        case .error: return Pill.coral.opacity(0.25)
         default: return Color.black.opacity(0.35)
         }
     }
@@ -88,7 +88,7 @@ struct WaveformView: View {
                     let rect = CGRect(x: x, y: (size.height - height) / 2, width: barWidth, height: height)
                     context.fill(
                         Path(roundedRect: rect, cornerRadius: barWidth / 2),
-                        with: .color(Theme.citron)
+                        with: .color(Pill.citron)
                     )
                     x += barWidth + spacing
                 }
@@ -96,6 +96,15 @@ struct WaveformView: View {
         }
         .frame(width: 160, height: 26)
     }
+}
+
+/// The pill floats over arbitrary wallpapers, so it stays ink-dark in both
+/// appearance modes — its palette is fixed, not adaptive.
+private enum Pill {
+    static let ink = Color(red: 0.067, green: 0.067, blue: 0.075)
+    static let citron = Color(red: 0.816, green: 0.945, blue: 0.247)
+    static let coral = Color(red: 1.0, green: 0.44, blue: 0.35)
+    static let hairline = Color.white.opacity(0.12)
 }
 
 /// Ring buffer of recent levels; stepped at most every 50ms.

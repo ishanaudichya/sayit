@@ -66,8 +66,13 @@ final class SmartFormatter {
 
         let session = warmSession ?? LanguageModelSession(instructions: Self.instructions)
         warmSession = nil
+        var prompt = "Transcript: \(text)"
+        let vocabulary = Store.shared.vocabularyWords
+        if !vocabulary.isEmpty {
+            prompt = "Prefer these exact spellings when they occur: \(vocabulary.joined(separator: ", ")).\n\n" + prompt
+        }
         let response = await withTimeout(seconds: timeout) {
-            try? await session.respond(to: "Transcript: \(text)").content
+            try? await session.respond(to: prompt).content
         }
         prewarm()
 

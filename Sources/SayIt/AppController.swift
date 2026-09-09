@@ -18,8 +18,6 @@ final class AppController {
     var status: Status = .idle
     var audioLevel: Float = 0
     var liveTranscript: String = ""
-    var totalWords: Int = 0
-    var totalDictations: Int = 0
     let permissions = PermissionsModel()
 
     private let hotkey = HotkeyMonitor()
@@ -40,8 +38,8 @@ final class AppController {
             "hapticsEnabled": true,
             "smartFormattingEnabled": true,
         ])
-        totalWords = UserDefaults.standard.integer(forKey: "stats.totalWords")
-        totalDictations = UserDefaults.standard.integer(forKey: "stats.totalDictations")
+        Appearance.applyStored()
+        _ = Store.shared // load history + dictionary
         _ = SoundPlayer.shared // preload sound buffers before the first Fn press
         SmartFormatter.shared.prewarm()
         permissions.refresh()
@@ -139,18 +137,24 @@ final class AppController {
                 return
             }
 
-            // Smart formatting: bounded time slice scaled to length; raw text
-            // pastes if the model is slow or unavailable.
-            var finalText = trimmed
-            let budget = min(1.2 + Double(trimmed.split { $0.isWhitespace }.count) * 0.03, 2.5)
-            if let cleaned = await SmartFormatter.shared.clean(trimmed, timeout: budget) {
+            // Dictionary replacements first (deterministic), then smart
+            // formatting inside a bounded time slice — raw text pastes if the
+            // model is slow or unavailable.
+            let replaced = Store.shared.applyReplacements(to: trimmed)
+            var finalText = replaced
+            let budget = min(1.2 + Double(replaced.split { $0.isWhitespace }.count) * 0.03, 2.5)
+            if let cleaned = await SmartFormatter.shared.clean(replaced, timeout: budget) {
                 finalText = cleaned
             }
 
             do {
                 try self.inserter.insert(finalText)
                 self.status = .inserted
-                self.recordStats(for: finalText)
+                Store.shared.addRecord(
+                    raw: trimmed,
+                    text: finalText,
+                    duration: startedAt.map { Date().timeIntervalSince($0) } ?? 0
+                )
                 SoundPlayer.shared.play(.success)
                 self.bubble.hide(after: 0.45)
             } catch TextInserter.InsertError.secureInput {
@@ -195,13 +199,6 @@ final class AppController {
             NSLog("SayIt: watchdog ended dictation (fnDown=\(fnStillDown), tooLong=\(tooLong))")
             endDictation()
         }
-    }
-
-    private func recordStats(for text: String) {
-        totalWords += text.split { $0.isWhitespace || $0.isNewline }.count
-        totalDictations += 1
-        UserDefaults.standard.set(totalWords, forKey: "stats.totalWords")
-        UserDefaults.standard.set(totalDictations, forKey: "stats.totalDictations")
     }
 
     private func failDictation(_ message: String) {

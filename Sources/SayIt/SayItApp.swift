@@ -15,14 +15,17 @@ struct SayItApp: App {
         Window("SayIt", id: WindowID.main) {
             MainWindowView()
                 .environment(AppController.shared)
+                .frame(minWidth: 840, minHeight: 560)
         }
-        .windowResizability(.contentSize)
+        .windowResizability(.contentMinSize)
         .windowStyle(.hiddenTitleBar)
         .defaultLaunchBehavior(.presented)
 
         Settings {
-            SettingsView()
+            SettingsPage()
                 .environment(AppController.shared)
+                .frame(width: 470, height: 560)
+                .containerBackground(Theme.ground, for: .window)
         }
     }
 }

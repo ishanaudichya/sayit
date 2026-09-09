@@ -33,11 +33,11 @@ struct OnboardingView: View {
         }
         .padding(28)
         .frame(width: 620, height: 560)
-        .background(Theme.ink)
+        .background(Theme.ground)
         .animation(Theme.spring, value: step)
         .onAppear {
             app.permissions.refresh()
-            dictationBaseline = app.totalDictations
+            dictationBaseline = Store.shared.records.count
         }
         .onReceive(poll) { _ in
             let hadAccessibility = app.permissions.accessibilityGranted
@@ -111,12 +111,12 @@ struct OnboardingView: View {
                 Text("Hold a key. Speak.\nIt's typed.")
                     .font(Theme.display(30))
                     .tracking(-0.8)
-                    .foregroundStyle(Theme.bone)
+                    .foregroundStyle(Theme.text)
                     .multilineTextAlignment(.center)
                     .lineSpacing(3)
                 Text("Fast, private dictation for your Mac.\nEverything runs on-device — nothing ever leaves it.")
                     .font(Theme.body(13.5))
-                    .foregroundStyle(Theme.boneDim)
+                    .foregroundStyle(Theme.textDim)
                     .multilineTextAlignment(.center)
                     .lineSpacing(3)
             }
@@ -175,30 +175,30 @@ struct OnboardingView: View {
             Text("Say hello")
                 .font(Theme.display(24))
                 .tracking(-0.5)
-                .foregroundStyle(Theme.bone)
+                .foregroundStyle(Theme.text)
             HStack(spacing: 8) {
                 Text("Click the field, hold")
-                    .foregroundStyle(Theme.boneDim)
+                    .foregroundStyle(Theme.textDim)
                 KeyCap(size: 30)
                 Text("and speak. Release when done.")
-                    .foregroundStyle(Theme.boneDim)
+                    .foregroundStyle(Theme.textDim)
             }
             .font(Theme.body(13))
 
             TextEditor(text: $testText)
                 .font(.system(size: 14))
-                .foregroundStyle(Theme.bone)
+                .foregroundStyle(Theme.text)
                 .scrollContentBackground(.hidden)
                 .padding(10)
                 .frame(width: 420, height: 90)
                 .background(
                     RoundedRectangle(cornerRadius: Theme.Radius.well, style: .continuous)
-                        .fill(Theme.inkSunken)
+                        .fill(Theme.sunken)
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: Theme.Radius.well, style: .continuous)
                         .strokeBorder(
-                            hasDictated ? Theme.citron.opacity(0.6) : Theme.hairline,
+                            hasDictated ? Theme.accent.opacity(0.6) : Theme.hairline,
                             lineWidth: 1
                         )
                 )
@@ -206,7 +206,7 @@ struct OnboardingView: View {
             if hasDictated {
                 Label("That's it — you're set.", systemImage: "checkmark.circle.fill")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Theme.citron)
+                    .foregroundStyle(Theme.accent)
                     .transition(.scale.combined(with: .opacity))
             }
         }
@@ -216,7 +216,7 @@ struct OnboardingView: View {
     // MARK: Logic
 
     private var hasDictated: Bool {
-        app.totalDictations > dictationBaseline || !testText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        Store.shared.records.count > dictationBaseline || !testText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     private var stepSatisfied: Bool {
@@ -275,14 +275,14 @@ private struct StepLayout<Action: View>: View {
         VStack(spacing: 18) {
             ZStack {
                 Circle()
-                    .fill(Theme.citron.opacity(granted ? 0.16 : 0.08))
+                    .fill(Theme.accent.opacity(granted ? 0.16 : 0.08))
                     .frame(width: 84, height: 84)
                 if let customIcon {
                     customIcon()
                 } else {
                     Image(systemName: icon)
                         .font(.system(size: 30, weight: .medium))
-                        .foregroundStyle(granted ? Theme.citron : Theme.bone)
+                        .foregroundStyle(granted ? Theme.accent : Theme.text)
                 }
             }
             .animation(Theme.spring, value: granted)
@@ -291,10 +291,10 @@ private struct StepLayout<Action: View>: View {
                 Text(title)
                     .font(Theme.display(24))
                     .tracking(-0.5)
-                    .foregroundStyle(Theme.bone)
+                    .foregroundStyle(Theme.text)
                 Text(subtitle)
                     .font(Theme.body(13))
-                    .foregroundStyle(Theme.boneDim)
+                    .foregroundStyle(Theme.textDim)
                     .multilineTextAlignment(.center)
                     .lineSpacing(3)
                     .frame(maxWidth: 420)
@@ -303,7 +303,7 @@ private struct StepLayout<Action: View>: View {
             if granted {
                 Label(grantedLabel, systemImage: "checkmark.circle.fill")
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundStyle(Theme.citron)
+                    .foregroundStyle(Theme.accent)
                     .transition(.scale.combined(with: .opacity))
             } else {
                 action
