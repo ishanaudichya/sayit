@@ -1,9 +1,11 @@
 #!/usr/bin/env swift
-// Generates SayIt's UI sound palette — tiny synthesized "flicks" — into
-// Sources/SayIt/Resources/Sounds/*.wav. Run from the repo root:
+// Generates SayIt's UI sound palette into Sources/SayIt/Resources/Sounds/*.wav.
+// Run from the repo root:
 //   swift scripts/make_sounds.swift
-// All sounds are original synthesis (sine sweeps + noise transients), so the
-// app ships nothing with licensing strings attached.
+//
+// Design: low, percussive "thocks" — a damped low tone plus a few
+// milliseconds of soft noise transient. Snappy like a good keyboard, never
+// chirpy. All sounds are original synthesis; nothing licensed.
 
 import Foundation
 
@@ -35,45 +37,47 @@ func fadeTail(_ samples: inout [Double], over count: Int = 96) {
 
 // MARK: - Synthesis
 
-/// A pitch-swept tick with an exponential decay and a tiny noise transient —
-/// the "flick". Sweeping up feels like engaging; down feels like releasing.
-func flick(duration: Double, from f0: Double, to f1: Double, tau: Double,
-           gain: Double, transient: Double, secondHarmonic: Double = 0.18) -> [Double] {
+/// A single soft knock: damped low tone (with a tiny initial pitch drop, the
+/// way struck objects behave) plus a lowpassed noise transient for the snap.
+/// `click` scales the transient; `brightness` (0–1) is the noise lowpass —
+/// lower is duller.
+func thock(frequency: Double, tau: Double, click: Double, brightness: Double,
+           duration: Double) -> [Double] {
     let n = Int(duration * sampleRate)
     var out = [Double](repeating: 0, count: n)
+    var lowpass = 0.0
     var phase = 0.0
     for i in 0..<n {
         let t = Double(i) / sampleRate
-        let f = f0 + (f1 - f0) * (t / duration)
+        let f = frequency * (1 + 0.05 * exp(-t / 0.012))
         phase += 2 * .pi * f / sampleRate
-        let envelope = exp(-t / tau)
-        var v = (sin(phase) + secondHarmonic * sin(2 * phase)) * envelope
-        if t < 0.003, transient > 0 {
-            v += transient * Double.random(in: -1...1) * exp(-t / 0.0015)
-        }
-        out[i] = v * gain
+        let body = (sin(phase) + 0.30 * sin(2 * phase)) * exp(-t / tau)
+        lowpass += (Double.random(in: -1...1) - lowpass) * brightness
+        let transient = lowpass * exp(-t / 0.004) * click
+        out[i] = body + transient
     }
     fadeTail(&out)
     return out
 }
 
-/// A short melodic blip built from fixed-pitch partials with soft attacks.
-func blip(notes: [(start: Double, freq: Double, tau: Double, gain: Double)],
-          duration: Double) -> [Double] {
+/// Overlay parts at offsets into one buffer.
+func mix(_ parts: [(start: Double, samples: [Double])], duration: Double) -> [Double] {
     let n = Int(duration * sampleRate)
     var out = [Double](repeating: 0, count: n)
-    for note in notes {
-        let startIndex = Int(note.start * sampleRate)
-        guard startIndex < n else { continue }
-        for i in startIndex..<n {
-            let t = Double(i - startIndex) / sampleRate
-            let envelope = exp(-t / note.tau) * min(1, t / 0.002)
-            let v = sin(2 * .pi * note.freq * t) + 0.25 * sin(4 * .pi * note.freq * t)
-            out[i] += v * envelope * note.gain
+    for part in parts {
+        let offset = Int(part.start * sampleRate)
+        for (i, sample) in part.samples.enumerated() where offset + i < n {
+            out[offset + i] += sample
         }
     }
     fadeTail(&out)
     return out
+}
+
+func normalized(_ samples: [Double], peak: Double) -> [Double] {
+    let maxAmp = samples.map(abs).max() ?? 1
+    guard maxAmp > 0 else { return samples }
+    return samples.map { $0 * peak / maxAmp }
 }
 
 // MARK: - The palette
@@ -82,14 +86,32 @@ let outputDir = URL(fileURLWithPath: "Sources/SayIt/Resources/Sounds")
 try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
 
 let palette: [(name: String, samples: [Double])] = [
-    // Fn down — bright flick up, crisp transient. "Go."
-    ("start", flick(duration: 0.07, from: 850, to: 1500, tau: 0.022, gain: 0.32, transient: 0.25)),
-    // Fn up — mirrored flick down, softer. "Done talking."
-    ("stop", flick(duration: 0.09, from: 1250, to: 620, tau: 0.030, gain: 0.30, transient: 0.15)),
-    // Text inserted — quiet two-note blip (E6 → A6), barely there.
-    ("success", blip(notes: [(0, 1318.5, 0.045, 0.20), (0.055, 1760, 0.060, 0.20)], duration: 0.18)),
-    // Something failed — low double knock.
-    ("error", blip(notes: [(0, 196, 0.040, 0.32), (0.085, 165, 0.050, 0.32)], duration: 0.20)),
+    // Fn down — a crisp felt thock. "Go."
+    ("start", normalized(
+        thock(frequency: 210, tau: 0.030, click: 1.0, brightness: 0.22, duration: 0.07),
+        peak: 0.42
+    )),
+    // Fn up — darker, softer. "Done talking."
+    ("stop", normalized(
+        thock(frequency: 160, tau: 0.035, click: 0.65, brightness: 0.16, duration: 0.08),
+        peak: 0.38
+    )),
+    // Text inserted — quiet low "du-dum", rising. Barely there.
+    ("success", normalized(
+        mix([
+            (0.00, thock(frequency: 240, tau: 0.028, click: 0.35, brightness: 0.15, duration: 0.08)),
+            (0.07, thock(frequency: 320, tau: 0.035, click: 0.35, brightness: 0.15, duration: 0.09)),
+        ], duration: 0.17),
+        peak: 0.32
+    )),
+    // Something failed — low double knock, falling.
+    ("error", normalized(
+        mix([
+            (0.00, thock(frequency: 150, tau: 0.045, click: 0.5, brightness: 0.12, duration: 0.10)),
+            (0.09, thock(frequency: 118, tau: 0.050, click: 0.5, brightness: 0.12, duration: 0.11)),
+        ], duration: 0.21),
+        peak: 0.40
+    )),
 ]
 
 for sound in palette {
