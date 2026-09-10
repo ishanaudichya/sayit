@@ -35,26 +35,49 @@ func fadeTail(_ samples: inout [Double], over count: Int = 96) {
     }
 }
 
-// MARK: - Synthesis
+// MARK: - Synthesis (modal: taps on a small dense object)
 
-/// A single soft knock: damped low tone (with a tiny initial pitch drop, the
-/// way struck objects behave) plus a lowpassed noise transient for the snap.
-/// `click` scales the transient; `brightness` (0–1) is the noise lowpass —
-/// lower is duller.
-func thock(frequency: Double, tau: Double, click: Double, brightness: Double,
-           duration: Double) -> [Double] {
+/// Two-pole resonator: rings at `frequency`, decaying with time constant `tau`.
+struct Resonator {
+    private let c1: Double
+    private let c2: Double
+    private var y1 = 0.0
+    private var y2 = 0.0
+    let amplitude: Double
+
+    init(frequency: Double, tau: Double, amplitude: Double) {
+        let r = exp(-1.0 / (tau * sampleRate))
+        c1 = 2 * r * cos(2 * .pi * frequency / sampleRate)
+        c2 = -r * r
+        self.amplitude = amplitude
+    }
+
+    mutating func process(_ x: Double) -> Double {
+        let y = x + c1 * y1 + c2 * y2
+        y2 = y1
+        y1 = y
+        return y * amplitude
+    }
+}
+
+/// A physical-sounding tap: ~2ms of noise exciting a handful of damped
+/// resonant modes — the acoustics of striking a small object, not a tone.
+func tap(modes: [(frequency: Double, tau: Double, amplitude: Double)],
+         duration: Double) -> [Double] {
+    var resonators = modes.map {
+        Resonator(frequency: $0.frequency, tau: $0.tau, amplitude: $0.amplitude)
+    }
+    let excitation = 0.002
     let n = Int(duration * sampleRate)
     var out = [Double](repeating: 0, count: n)
-    var lowpass = 0.0
-    var phase = 0.0
     for i in 0..<n {
         let t = Double(i) / sampleRate
-        let f = frequency * (1 + 0.05 * exp(-t / 0.012))
-        phase += 2 * .pi * f / sampleRate
-        let body = (sin(phase) + 0.30 * sin(2 * phase)) * exp(-t / tau)
-        lowpass += (Double.random(in: -1...1) - lowpass) * brightness
-        let transient = lowpass * exp(-t / 0.004) * click
-        out[i] = body + transient
+        let input = t < excitation ? Double.random(in: -1...1) * (1 - t / excitation) : 0
+        var sample = 0.0
+        for k in resonators.indices {
+            sample += resonators[k].process(input)
+        }
+        out[i] = sample
     }
     fadeTail(&out)
     return out
@@ -86,31 +109,50 @@ let outputDir = URL(fileURLWithPath: "Sources/SayIt/Resources/Sounds")
 try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
 
 let palette: [(name: String, samples: [Double])] = [
-    // Fn down — a crisp felt thock. "Go."
+    // Fn down — a crisp tick with a little body: fingernail on dense wood.
     ("start", normalized(
-        thock(frequency: 210, tau: 0.030, click: 1.0, brightness: 0.22, duration: 0.07),
-        peak: 0.42
+        tap(modes: [
+            (frequency: 1700, tau: 0.008, amplitude: 1.0),
+            (frequency: 720, tau: 0.014, amplitude: 0.8),
+            (frequency: 3300, tau: 0.004, amplitude: 0.3),
+        ], duration: 0.06),
+        peak: 0.40
     )),
-    // Fn up — darker, softer. "Done talking."
+    // Fn up — the same object, tapped softer and deeper.
     ("stop", normalized(
-        thock(frequency: 160, tau: 0.035, click: 0.65, brightness: 0.16, duration: 0.08),
-        peak: 0.38
+        tap(modes: [
+            (frequency: 1150, tau: 0.009, amplitude: 1.0),
+            (frequency: 500, tau: 0.016, amplitude: 0.9),
+        ], duration: 0.07),
+        peak: 0.36
     )),
-    // Text inserted — quiet low "du-dum", rising. Barely there.
+    // Text inserted — two quick taps, second slightly brighter. Barely there.
     ("success", normalized(
         mix([
-            (0.00, thock(frequency: 240, tau: 0.028, click: 0.35, brightness: 0.15, duration: 0.08)),
-            (0.07, thock(frequency: 320, tau: 0.035, click: 0.35, brightness: 0.15, duration: 0.09)),
-        ], duration: 0.17),
-        peak: 0.32
+            (0.00, tap(modes: [
+                (frequency: 900, tau: 0.010, amplitude: 1.0),
+                (frequency: 450, tau: 0.018, amplitude: 0.7),
+            ], duration: 0.08)),
+            (0.07, tap(modes: [
+                (frequency: 1250, tau: 0.010, amplitude: 1.0),
+                (frequency: 600, tau: 0.016, amplitude: 0.7),
+            ], duration: 0.09)),
+        ], duration: 0.16),
+        peak: 0.30
     )),
-    // Something failed — low double knock, falling.
+    // Something failed — dull knock-knock, falling.
     ("error", normalized(
         mix([
-            (0.00, thock(frequency: 150, tau: 0.045, click: 0.5, brightness: 0.12, duration: 0.10)),
-            (0.09, thock(frequency: 118, tau: 0.050, click: 0.5, brightness: 0.12, duration: 0.11)),
-        ], duration: 0.21),
-        peak: 0.40
+            (0.00, tap(modes: [
+                (frequency: 380, tau: 0.020, amplitude: 1.0),
+                (frequency: 180, tau: 0.035, amplitude: 0.9),
+            ], duration: 0.11)),
+            (0.09, tap(modes: [
+                (frequency: 300, tau: 0.022, amplitude: 1.0),
+                (frequency: 150, tau: 0.040, amplitude: 0.9),
+            ], duration: 0.12)),
+        ], duration: 0.22),
+        peak: 0.38
     )),
 ]
 
